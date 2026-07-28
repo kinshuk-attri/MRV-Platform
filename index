@@ -176,6 +176,8 @@
     .map-stage { position: relative; overflow: hidden; background: #bec5b4; min-height: 466px; }
     .map-stage svg { display: block; width: 100%; height: 100%; min-height: 466px; }
     .field-polygon { cursor: pointer; stroke: #fff; stroke-width: 2.2; transition: .18s ease; vector-effect: non-scaling-stroke; }
+    #mapStage svg > :not(#fieldLayer):not(defs) { pointer-events: none; }
+    #mapStage #fieldLayer, #mapStage .field-polygon { pointer-events: all; }
     .field-polygon:hover { filter: brightness(1.08); stroke-width: 3.5; }
     .field-polygon.selected { stroke: var(--brand); stroke-width: 5; filter: drop-shadow(0 3px 4px rgba(7,56,24,.35)); }
     .map-overlay { position: absolute; left: 12px; top: 12px; display: flex; gap: 7px; z-index: 5; }
@@ -400,6 +402,41 @@
       .footer { flex-direction: column; }
       .scenario-grid { grid-template-columns: 1fr; }
     }
+  
+
+
+    @media (min-width: 861px) {
+      body.sidebar-collapsed .app-shell { grid-template-columns: 1fr; }
+      body.sidebar-collapsed .sidebar { transform: translateX(-105%); box-shadow: var(--shadow); }
+      body.sidebar-collapsed main { grid-column: 1; }
+      body.sidebar-collapsed .mobile-menu { display: inline-grid; place-items: center; }
+    }
+
+    /* Interaction completion layer */
+    .workflow-step, .metric-card, .trace-node, .report-card, .action-dots { transition: .18s ease; }
+    .workflow-step[data-interactive="true"], .metric-card[data-interactive="true"], .trace-node[data-interactive="true"] { cursor: pointer; }
+    .workflow-step[data-interactive="true"]:hover, .metric-card[data-interactive="true"]:hover, .trace-node[data-interactive="true"]:hover,
+    .workflow-step[data-interactive="true"]:focus-visible, .metric-card[data-interactive="true"]:focus-visible, .trace-node[data-interactive="true"]:focus-visible {
+      transform: translateY(-2px); border-color: #a8cdb1; box-shadow: var(--shadow-sm); outline: none;
+    }
+    .trace-node[data-interactive="true"]:hover, .trace-node[data-interactive="true"]:focus-visible { background: var(--brand-soft); }
+    .metric-card[data-interactive="true"]:hover, .metric-card[data-interactive="true"]:focus-visible { background: #fcfffc; }
+    .action-dots:hover, .action-dots:focus-visible { background: var(--brand-soft); color: var(--brand-dark); outline: none; }
+    .table-row-highlight { background: #f2fff5 !important; }
+    .locked-row { background: #f7faf7; }
+    .locked-row td { color: #627068; }
+    .preview-table { width: 100%; border-collapse: collapse; font-size: 10px; }
+    .preview-table th, .preview-table td { padding: 8px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+    .preview-table th { background: #f5f8f5; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-size: 8px; }
+    .preview-code { margin: 0; padding: 12px; border-radius: 10px; background: #142019; color: #d9f7df; font-size: 9px; line-height: 1.6; max-height: 310px; overflow: auto; white-space: pre-wrap; }
+    .modal-inline-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .validation-message { margin-top: 8px; font-size: 9px; font-weight: 750; color: #a63a3a; }
+    .filter-chip[data-has-menu="true"]::after { content: "⌄"; font-size: 9px; opacity: .65; }
+    .filter-chip.filtered { background: var(--brand-soft); color: var(--brand-dark); border-color: #b8eac5; }
+    .run-history { margin-top: 12px; display: grid; gap: 7px; }
+    .run-history-item { border: 1px solid var(--line); border-radius: 9px; padding: 9px; display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 9px; background: #fbfcfb; }
+    .run-history-item strong { font-size: 10px; }
+
   </style>
 </head>
 <body>
@@ -1189,5 +1226,405 @@
 
     updateScenario(); renderFieldPanel(fields[0]); applyLayer('verification');
   </script>
+
+  <script>
+  /* Fully interactive, local-only prototype enhancements */
+  (function () {
+    const qs = (s, root=document) => root.querySelector(s);
+    const qsa = (s, root=document) => Array.from(root.querySelectorAll(s));
+    const stop = (e) => { e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); };
+    const safeText = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const persist = (key, value) => localStorage.setItem(key, JSON.stringify(value));
+    const readPersisted = (key, fallback=[]) => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } };
+
+    function setModalValidation(message='') {
+      let node = qs('#modalValidation');
+      if (!node) {
+        node = document.createElement('div');
+        node.id = 'modalValidation';
+        node.className = 'validation-message';
+        qs('#modalBody').appendChild(node);
+      }
+      node.textContent = message;
+    }
+
+    function openPeriodPicker() {
+      const current = (qs('#periodBtn').textContent.match(/20\d{2}/) || ['2026'])[0];
+      openModal('Select reporting period', `
+        <div class="form-field"><label class="form-label">Inventory year</label>
+          <select class="form-select" id="enhancedPeriod">
+            ${['2024','2025','2026','2027'].map(y=>`<option ${y===current?'selected':''}>${y}</option>`).join('')}
+          </select>
+        </div>
+        <div class="scientific-note" style="margin-top:12px">Changing the period updates the workspace context. Demo values remain illustrative.</div>
+      `, 'Apply period', () => {
+        const year = qs('#enhancedPeriod').value;
+        qs('#periodBtn').textContent = `Reporting period · ${year} ▾`;
+        persist('sagriReportingPeriod', year);
+        closeModal();
+        showToast('Reporting period updated', `${year} is now active across the workspace.`, '▣');
+      });
+    }
+
+    function openMethodPicker() {
+      const current = qs('#methodBtn').textContent;
+      openModal('Select accounting framework', `
+        <div class="form-field"><label class="form-label">Framework</label>
+          <select class="form-select" id="enhancedMethod">
+            <option ${current.includes('GHG')?'selected':''}>GHG Protocol Land Sector and Removals</option>
+            <option ${current.includes('SBTi')?'selected':''}>SBTi FLAG progress reporting</option>
+            <option ${current.includes('Verra')?'selected':''}>Verra VM0042 screening</option>
+          </select>
+        </div>
+        <div class="scientific-note" style="margin-top:12px">The selected framework changes validation rules and output templates, while preserving the same evidence lineage.</div>
+      `, 'Apply framework', () => {
+        const value = qs('#enhancedMethod').value;
+        const label = value.startsWith('GHG') ? 'GHG Protocol LSR' : value.startsWith('SBTi') ? 'SBTi FLAG' : 'Verra VM0042';
+        qs('#methodBtn').textContent = `${label} ▾`;
+        persist('sagriFramework', value);
+        closeModal();
+        showToast('Framework updated', `${value} is now the active reporting lens.`, '✓');
+      });
+    }
+
+    function openAddField() {
+      openModal('Add a field', `
+        <div class="form-grid">
+          <div class="form-field"><label class="form-label">Field name</label><input class="form-input" id="newFieldName" placeholder="e.g. Saitama North 21"></div>
+          <div class="form-field"><label class="form-label">Supplier ID</label><input class="form-input" id="newFieldSupplier" placeholder="JP-KNT-000"></div>
+          <div class="form-field"><label class="form-label">Area (ha)</label><input class="form-input" id="newFieldArea" type="number" min="0.1" step="0.1" placeholder="125"></div>
+          <div class="form-field"><label class="form-label">Crop</label><select class="form-select" id="newFieldCrop"><option>Barley</option><option>Rice</option><option>Maize</option></select></div>
+        </div>
+        <div class="scientific-note" style="margin-top:12px"><strong>Next production step:</strong> AI-assisted boundary detection, tenure validation and duplicate-polygon checks.</div>
+      `, 'Create field record', () => {
+        const name = qs('#newFieldName').value.trim();
+        const supplier = qs('#newFieldSupplier').value.trim();
+        const area = Number(qs('#newFieldArea').value);
+        const crop = qs('#newFieldCrop').value;
+        if (!name || !supplier || !area || area <= 0) return setModalValidation('Enter a field name, supplier ID and valid area.');
+        const f = {
+          id: `F-${String(Date.now()).slice(-6)}`, name, supplier, area, crop,
+          status:'review', completeness:35, satellite:0, soc:0, uncertainty:35,
+          practice:'Evidence collection pending'
+        };
+        fields.push(f);
+        persist('sagriAddedFields', readPersisted('sagriAddedFields').concat(f));
+        renderFieldTable();
+        closeModal();
+        goToPage('fields');
+        setTimeout(()=>{
+          const row = qs(`[data-field-row="${f.id}"]`);
+          if (row) { row.classList.add('table-row-highlight'); row.scrollIntoView({behavior:'smooth', block:'center'}); }
+        }, 100);
+        showToast('Field record created', `${name} was added with evidence collection pending.`);
+      });
+    }
+
+    function parseCsv(content) {
+      const lines = content.trim().split(/\r?\n/).filter(Boolean);
+      if (lines.length < 2) return [];
+      const headers = lines[0].split(',').map(h=>h.trim().toLowerCase());
+      return lines.slice(1).map(line=>{
+        const cols = line.split(',').map(v=>v.trim());
+        const row = Object.fromEntries(headers.map((h,i)=>[h,cols[i]||'']));
+        return {
+          id: row.id || `F-${String(Date.now()+Math.random()*1000|0).slice(-6)}`,
+          name: row.name || row.field_name || 'Imported field',
+          supplier: row.supplier || row.supplier_id || 'IMPORTED',
+          area: Number(row.area || row.area_ha || 1),
+          crop: row.crop || 'Barley', status:'review', completeness:45, satellite:0,
+          soc:0, uncertainty:30, practice:row.practice || 'Imported activity data'
+        };
+      }).filter(f=>f.name && f.area>0);
+    }
+
+    function importRecords(file) {
+      const reader = new FileReader();
+      reader.onerror = () => setModalValidation('The selected file could not be read.');
+      reader.onload = () => {
+        try {
+          let imported = [];
+          if (file.name.toLowerCase().endsWith('.csv')) imported = parseCsv(String(reader.result));
+          else {
+            const geo = JSON.parse(String(reader.result));
+            imported = (geo.features || []).map((feature, i) => ({
+              id: feature.properties?.field_id || feature.properties?.id || `F-GEO${String(i+1).padStart(3,'0')}`,
+              name: feature.properties?.name || `Imported polygon ${i+1}`,
+              supplier: feature.properties?.supplier || 'GEOJSON',
+              area: Number(feature.properties?.area_ha || feature.properties?.area || 1),
+              crop: feature.properties?.crop || 'Barley', status:'review', completeness:50,
+              satellite:70, soc:0, uncertainty:28, practice:feature.properties?.practice || 'Imported geometry'
+            }));
+          }
+          if (!imported.length) return setModalValidation('No valid field records were found. Check the file structure.');
+          fields.push(...imported);
+          persist('sagriAddedFields', readPersisted('sagriAddedFields').concat(imported));
+          renderFieldTable();
+          closeModal();
+          goToPage('fields');
+          showToast('Import completed', `${imported.length} field record${imported.length===1?'':'s'} added for review.`);
+        } catch (err) { setModalValidation(`Validation failed: ${err.message}`); }
+      };
+      reader.readAsText(file);
+    }
+
+    function openImport() {
+      openModal('Import field and activity data', `
+        <div class="empty-state">
+          <div class="empty-icon">⇧</div>
+          <div class="empty-title">Select a CSV or GeoJSON file</div>
+          <div class="empty-copy">CSV columns supported: id, name, supplier, area_ha, crop and practice. GeoJSON feature properties may use the same names.</div>
+          <input id="enhancedImportFile" type="file" accept=".csv,.json,.geojson,text/csv,application/json" style="margin-top:14px;font-size:10px;max-width:100%">
+        </div>
+      `, 'Validate and import', () => {
+        const file = qs('#enhancedImportFile').files[0];
+        if (!file) return setModalValidation('Choose a CSV or GeoJSON file to continue.');
+        setModalValidation('Validating file…');
+        importRecords(file);
+      });
+    }
+
+    function saveScenarioVersion() {
+      const versions = readPersisted('sagriScenarioVersions');
+      const version = {id:`Scenario v${versions.length+1}`, created:new Date().toISOString(), ...scenarioState};
+      versions.push(version); persist('sagriScenarioVersions', versions);
+      showToast('Scenario version saved', `${version.id} was stored locally with the current assumptions.`);
+    }
+
+    function openProgrammeCreator() {
+      openModal('Create programme from scenario', `
+        <div class="form-grid">
+          <div class="form-field"><label class="form-label">Programme name</label><input class="form-input" id="programmeName" value="Kanto Regenerative Barley 2027"></div>
+          <div class="form-field"><label class="form-label">Initial rollout</label><select class="form-select" id="programmeRollout"><option>2,500 ha pilot</option><option>5,000 ha phase 1</option><option>Full eligible area</option></select></div>
+          <div class="form-field"><label class="form-label">Programme owner</label><input class="form-input" id="programmeOwner" value="Enterprise Climate Team"></div>
+          <div class="form-field"><label class="form-label">Target start</label><input class="form-input" id="programmeStart" type="date" value="2027-01-15"></div>
+        </div>
+        <div class="scientific-note" style="margin-top:12px">The programme will carry the current scenario assumptions, eligibility criteria, sampling estimate and P50/P90 outcomes.</div>
+      `, 'Create programme', () => {
+        const name = qs('#programmeName').value.trim();
+        if (!name) return setModalValidation('Enter a programme name.');
+        const programme = {name, rollout:qs('#programmeRollout').value, owner:qs('#programmeOwner').value.trim(), start:qs('#programmeStart').value, scenario:{...scenarioState}};
+        const programmes = readPersisted('sagriProgrammes'); programmes.push(programme); persist('sagriProgrammes', programmes);
+        qs('.workspace-name').textContent = name;
+        closeModal();
+        showToast('Programme created', `${name} is ready for field eligibility and sampling setup.`);
+      });
+    }
+
+    function openNewRun() {
+      const runs = readPersisted('sagriRuns');
+      const suggested = `MRV-2026.${String(8+runs.length).padStart(2,'0')}`;
+      openModal('Start a new MRV run', `
+        <div class="form-grid">
+          <div class="form-field"><label class="form-label">Run name</label><input class="form-input" id="newRunName" value="${suggested}"></div>
+          <div class="form-field"><label class="form-label">Purpose</label><select class="form-select" id="newRunPurpose"><option>Internal planning</option><option>External inventory</option><option>Assurance rerun</option></select></div>
+        </div>
+        <div class="scientific-note" style="margin-top:12px">A new run creates an immutable input snapshot and never overwrites prior results.</div>
+      `, 'Create run', () => {
+        const name = qs('#newRunName').value.trim();
+        if (!name) return setModalValidation('Enter a run name.');
+        const run = {name, purpose:qs('#newRunPurpose').value, created:new Date().toISOString(), status:'Draft'};
+        runs.push(run); persist('sagriRuns', runs);
+        const currentValue = qs('#page-mrv .metric-card .metric-value');
+        const currentFoot = qs('#page-mrv .metric-card .metric-foot');
+        if (currentValue) currentValue.textContent = name;
+        if (currentFoot) currentFoot.textContent = `Draft · created ${new Date().toLocaleDateString('en-GB',{day:'2-digit',month:'short'})}`;
+        closeModal(); showToast('MRV run created', `${name} is ready for configuration.`);
+      });
+    }
+
+    function openReviewerInvite() {
+      openModal('Invite assurance reviewer', `
+        <div class="form-grid">
+          <div class="form-field"><label class="form-label">Reviewer name</label><input class="form-input" id="reviewerName" placeholder="e.g. Maya Tanaka"></div>
+          <div class="form-field"><label class="form-label">Email</label><input class="form-input" id="reviewerEmail" type="email" placeholder="reviewer@example.com"></div>
+          <div class="form-field"><label class="form-label">Access scope</label><select class="form-select" id="reviewerScope"><option>Inventory + evidence</option><option>Model + uncertainty only</option><option>Spatial register only</option></select></div>
+          <div class="form-field"><label class="form-label">Permission</label><select class="form-select" id="reviewerAccess"><option>Read + comment</option><option>Read only</option><option>Restricted</option></select></div>
+        </div>
+      `, 'Send invite', () => {
+        const name = qs('#reviewerName').value.trim(); const email = qs('#reviewerEmail').value.trim();
+        if (!name || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return setModalValidation('Enter a reviewer name and valid email address.');
+        const tbody = qs('#page-reports table tbody');
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td><div class="table-primary">${safeText(name)}</div><div class="table-secondary">${safeText(email)}</div></td><td>${safeText(qs('#reviewerScope').value)}</td><td>0 open</td><td>Invited now</td><td>${safeText(qs('#reviewerAccess').value)}</td><td><span class="status-pill warn">Invited</span></td>`;
+        tbody.appendChild(tr);
+        const reviewers=readPersisted('sagriReviewers');reviewers.push({name,email,scope:qs('#reviewerScope').value,access:qs('#reviewerAccess').value});persist('sagriReviewers',reviewers);
+        closeModal(); showToast('Reviewer invited', `${name} received controlled access to the assurance room.`);
+      });
+    }
+
+    const reportPreviews = {
+      'FLAG inventory workbook': `<table class="preview-table"><thead><tr><th>Crop</th><th>Region</th><th>Area</th><th>P50 removals</th><th>P90 removals</th><th>Primary data</th></tr></thead><tbody><tr><td>Barley</td><td>Kanto</td><td>12,480 ha</td><td>18,642 tCO₂e</td><td>15,845 tCO₂e</td><td>91%</td></tr></tbody></table>`,
+      'Assurance evidence index': `<table class="preview-table"><thead><tr><th>Field</th><th>Evidence</th><th>Satellite</th><th>Status</th></tr></thead><tbody>${fields.slice(0,5).map(f=>`<tr><td>${f.id}</td><td>${f.completeness}%</td><td>${f.satellite}%</td><td>${f.status}</td></tr>`).join('')}</tbody></table>`,
+      'Spatial boundary register': `<pre class="preview-code">${safeText(JSON.stringify({type:'FeatureCollection',features:fields.slice(0,2).map(f=>({type:'Feature',properties:{field_id:f.id,name:f.name,status:f.status},geometry:{type:'Polygon',coordinates:'[coordinates hidden in preview]'}}))},null,2))}</pre>`,
+      'Uncertainty statement': `<div class="scientific-note"><strong>Programme pooled uncertainty:</strong> ±14.9%<br><strong>P50:</strong> 18,642 tCO₂e<br><strong>P90:</strong> 15,845 tCO₂e<br><br>Primary drivers: initial SOC stock, calibration domain, practice persistence and sampling representation.</div>`,
+      'Allocation & no-double-counting log': `<table class="preview-table"><thead><tr><th>Lot</th><th>Owner</th><th>Basis</th><th>Status</th></tr></thead><tbody><tr><td>BH-26-118</td><td>Barley Horizon 2030</td><td>Verified physical flow</td><td>Duplicate</td></tr><tr><td>BH-26-119</td><td>Barley Horizon 2030</td><td>Verified physical flow</td><td>Clean</td></tr></tbody></table>`,
+      'Management progress brief': `<div class="scientific-note"><strong>2026 position</strong><br>12,480 ha enrolled · 83% verification readiness · 18,642 tCO₂e P50 removals.<br><br><strong>Management decision:</strong> prioritise evidence closure on 338 ha outside the current model domain and resolve one material allocation exception before external reporting.</div>`
+    };
+
+    function previewReport(button) {
+      const card = button.closest('.report-card');
+      const title = qs('.report-title', card).textContent.trim();
+      openModal(`${title} · preview`, reportPreviews[title] || '<div class="empty-state">Preview unavailable.</div>', 'Close preview', closeModal);
+      qs('#modalCancel').classList.add('hidden');
+      const restore = () => qs('#modalCancel').classList.remove('hidden');
+      qs('#modalConfirm').addEventListener('click', restore, {once:true});
+      qs('#modalClose').addEventListener('click', restore, {once:true});
+    }
+
+    function openFieldActions(button) {
+      const row = button.closest('tr[data-field-row]');
+      const f = fields.find(x=>x.id===row?.dataset.fieldRow);
+      if (!f) return;
+      openModal(`${f.name} · actions`, `
+        <div class="data-grid">
+          <div class="data-cell"><div class="data-label">Field ID</div><div class="data-value">${f.id}</div></div>
+          <div class="data-cell"><div class="data-label">Supplier</div><div class="data-value">${f.supplier}</div></div>
+          <div class="data-cell"><div class="data-label">Evidence</div><div class="data-value">${f.completeness}%</div></div>
+          <div class="data-cell"><div class="data-label">Status</div><div class="data-value">${f.status}</div></div>
+        </div>
+        <div class="modal-inline-actions"><button type="button" class="secondary-btn" id="exportFieldRecord">Export JSON</button><button type="button" class="secondary-btn" id="verifyFromMenu">Mark verified</button></div>
+      `, 'Open full record', () => { closeModal(); renderFieldPanel(f); goToPage('overview'); });
+      qs('#exportFieldRecord').addEventListener('click',()=>downloadFile(`${f.id}_record.json`,JSON.stringify(f,null,2),'application/json'));
+      qs('#verifyFromMenu').addEventListener('click',()=>{ f.status='verified';f.completeness=Math.max(95,f.completeness);renderFieldTable();closeModal();showToast('Field verified',`${f.name} is now claim ready.`); });
+    }
+
+    function openReadinessMenu() {
+      openModal('Inventory readiness · actions', `
+        <div class="scientific-note"><strong>83% ready for controlled review.</strong><br>Readiness is calculated from evidence completeness, model validity and allocation cleanliness.</div>
+        <div class="evidence-list" style="margin-top:10px">
+          <div class="evidence-item"><span>Evidence completeness</span><strong>91%</strong></div>
+          <div class="evidence-item"><span>Model domain coverage</span><strong>97.3%</strong></div>
+          <div class="evidence-item"><span>Clean allocation coverage</span><strong>82%</strong></div>
+        </div>
+      `, 'Open MRV checks', () => { closeModal(); goToPage('mrv'); });
+    }
+
+    function lockCleanAllocations() {
+      const button = qs('#lockAllocationBtn');
+      if (button.dataset.locked === 'true') {
+        showToast('Allocations already locked','The clean allocation set is already frozen for reporting.');
+        return;
+      }
+      const cleanRows = qsa('#allocationTable tr').filter(row=>qs('.status-pill.good',row));
+      cleanRows.forEach(row=>{ row.classList.add('locked-row'); qs('td:last-child',row).innerHTML='<span class="status-pill good">Locked</span>'; });
+      button.textContent = `${cleanRows.length} allocations locked`;
+      button.dataset.locked = 'true';
+      persist('sagriLockedAllocations', cleanRows.map(r=>qs('.table-primary',r).textContent.trim()));
+      showToast('Clean allocations locked', `${cleanRows.length} allocation records were frozen for reporting.`);
+    }
+
+    function filterAllocationTable(mode, button) {
+      qsa('#page-traceability [data-allocation-filter]').forEach(b=>b.classList.toggle('active',b===button));
+      qsa('#allocationTable tr').forEach(row=>{
+        const exceptional = !!qs('.status-pill.risk,.status-pill.warn',row);
+        row.style.display = mode==='exceptions' && !exceptional ? 'none' : '';
+      });
+      showToast('Allocation view updated', mode==='exceptions'?'Showing only duplicate and review items.':'Showing all allocation records.','⇄');
+    }
+
+    function cycleOverviewFilter(button) {
+      const label = button.dataset.filterType;
+      const options = label==='region' ? ['All regions','Kawagoe','Saitama','Chiba','Ibaraki','Gunma','Tochigi'] : label==='crop' ? ['Barley','All crops'] : ['2026 season','All seasons'];
+      const current = options.indexOf(button.textContent.replace('⌄','').trim());
+      const next = options[(current+1) % options.length];
+      button.textContent = next;
+      button.classList.toggle('filtered', !next.startsWith('All') && next!=='Barley' && next!=='2026 season');
+      if (label==='region') {
+        qsa('.field-polygon').forEach(poly=>{
+          const f=fields.find(x=>x.id===poly.dataset.field);
+          const match=next==='All regions'||f?.name.startsWith(next);
+          poly.style.opacity=match?'1':'.12'; poly.style.pointerEvents=match?'auto':'none';
+        });
+      }
+      showToast('Control tower filter updated', `${label[0].toUpperCase()+label.slice(1)}: ${next}.`,'⌕');
+    }
+
+    function openTraceNode(node, index) {
+      const details = [
+        ['Field evidence','12 fields across 2,412 ha are connected to boundary, tenure and practice evidence.'],
+        ['Quantification units','Four climate × soil × practice strata preserve model applicability and uncertainty.'],
+        ['Harvest lots','Ten harvest lots carry physical quantity, dates and linked field outcomes.'],
+        ['Supplier aggregation','Supplier receipts reconcile inbound lots before enterprise allocation.'],
+        ['Procurement linkage','Purchase records establish the physical-flow basis for Scope 3 allocation.'],
+        ['Corporate inventory','The final allocated outcome enters FLAG Scope 3 Category 1 with one claim owner.']
+      ][index];
+      openModal(details[0], `<div class="scientific-note">${details[1]}</div><div class="mini-row" style="margin-top:10px"><span>Lineage status</span><strong>${index===4?'1 exception':'Complete'}</strong></div><div class="mini-row"><span>Supporting records</span><strong>${[38,12,10,7,4,2][index]}</strong></div>`, index===4?'Resolve exception':'Close', index===4?()=>{closeModal();qs('#resolveDuplicateBtn').click();}:closeModal);
+    }
+
+    function openWorkflowStep(step, index) {
+      const title = qs('.step-title',step).textContent;
+      const meta = qs('.step-meta',step).textContent;
+      const states = ['Completed and locked','Completed and locked','Active work queue','Pending evidence threshold','Pending verified inputs','Pending clean lineage'];
+      openModal(title, `<div class="scientific-note"><strong>${states[index]}</strong><br>${meta}</div><div class="mini-row" style="margin-top:10px"><span>Responsible persona</span><strong>${['Climate lead','GIS analyst','Field partner','MRV analyst','Carbon scientist','Supply-chain analyst'][index]}</strong></div>`, index===2?'Open current queue':'Close', index===2?()=>{closeModal();goToPage('fields');}:closeModal);
+    }
+
+    function openMetricDetail(card) {
+      const label = qs('.metric-label',card)?.textContent.trim() || 'Metric';
+      const value = qs('.metric-value',card)?.textContent.trim() || '';
+      const foot = qs('.metric-foot',card)?.textContent.trim() || '';
+      openModal(label, `<div style="font-size:30px;font-weight:800;letter-spacing:-.04em">${safeText(value)}</div><div class="section-copy">${safeText(foot)}</div><div class="scientific-note" style="margin-top:12px">This metric is calculated from the same governed evidence graph used by fields, MRV runs and reporting outputs.</div>`, 'Close', closeModal);
+    }
+
+    // Restore locally added field records on reload.
+    readPersisted('sagriAddedFields').forEach(f=>{ if (!fields.some(x=>x.id===f.id)) fields.push(f); });
+    renderFieldTable();
+    const savedPeriod = readPersisted('sagriReportingPeriod', null); if (savedPeriod) qs('#periodBtn').textContent=`Reporting period · ${savedPeriod} ▾`;
+    const savedFramework = readPersisted('sagriFramework', null); if (savedFramework) qs('#methodBtn').textContent=`${savedFramework.startsWith('GHG')?'GHG Protocol LSR':savedFramework.startsWith('SBTi')?'SBTi FLAG':'Verra VM0042'} ▾`;
+
+    // Mark and wire non-button interactive product surfaces.
+    qsa('.workflow-step').forEach((el,i)=>{el.dataset.interactive='true';el.tabIndex=0;el.setAttribute('role','button');el.addEventListener('click',()=>openWorkflowStep(el,i));el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openWorkflowStep(el,i);}});});
+    qsa('.trace-node').forEach((el,i)=>{el.dataset.interactive='true';el.tabIndex=0;el.setAttribute('role','button');el.addEventListener('click',()=>openTraceNode(el,i));el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openTraceNode(el,i);}});});
+    qsa('.metric-card').forEach(el=>{el.dataset.interactive='true';el.tabIndex=0;el.setAttribute('role','button');el.addEventListener('click',()=>openMetricDetail(el));el.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openMetricDetail(el);}});});
+
+    // SVG hit-testing fallback: decorative map layers never block field selection.
+    const mapSvg = qs('#mapStage > svg');
+    if (mapSvg) mapSvg.addEventListener('click', e => {
+      if (e.target.closest?.('.field-polygon')) return;
+      const point = mapSvg.createSVGPoint(); point.x=e.clientX; point.y=e.clientY;
+      const local = point.matrixTransform(mapSvg.getScreenCTM().inverse());
+      const polygon = qsa('.field-polygon').find(p => typeof p.isPointInFill === 'function' && p.isPointInFill(local));
+      if (polygon) {
+        const field=fields.find(f=>f.id===polygon.dataset.field);
+        if (field) renderFieldPanel(field);
+      }
+    });
+
+    // Add explicit context to filters.
+    const overviewChips=qsa('#page-overview .section-head .filter-chip');
+    ['region','crop','season'].forEach((type,i)=>{if(overviewChips[i]){overviewChips[i].dataset.filterType=type;overviewChips[i].dataset.hasMenu='true';}});
+    const allocationChips=qsa('#page-traceability .card-head .filter-chip');
+    allocationChips.forEach((b,i)=>{b.dataset.allocationFilter=i===0?'all':'exceptions';});
+
+    document.addEventListener('click', function(e) {
+      const btn = e.target.closest('button');
+      if (!btn) return;
+      if (btn.id==='closeSidebar') { stop(e); if (window.innerWidth>860) document.body.classList.add('sidebar-collapsed'); else qs('#sidebar').classList.remove('open'); return; }
+      if (btn.id==='openSidebar') { stop(e); if (window.innerWidth>860) document.body.classList.remove('sidebar-collapsed'); else qs('#sidebar').classList.add('open'); return; }
+      if (btn.id==='periodBtn') { stop(e); return openPeriodPicker(); }
+      if (btn.id==='methodBtn') { stop(e); return openMethodPicker(); }
+      if (btn.id==='addFieldBtn') { stop(e); return openAddField(); }
+      if (btn.id==='importDataBtn') { stop(e); return openImport(); }
+      if (btn.id==='saveScenario') { stop(e); return saveScenarioVersion(); }
+      if (btn.id==='createProgrammeBtn') { stop(e); return openProgrammeCreator(); }
+      if (btn.id==='newRunBtn') { stop(e); return openNewRun(); }
+      if (btn.id==='inviteReviewerBtn') { stop(e); return openReviewerInvite(); }
+      if (btn.id==='lockAllocationBtn') { stop(e); return lockCleanAllocations(); }
+      if (btn.matches('.report-actions .text-btn')) { stop(e); return previewReport(btn); }
+      if (btn.matches('#fieldTableBody .action-dots')) { stop(e); return openFieldActions(btn); }
+      if (btn.matches('#page-overview .action-dots')) { stop(e); return openReadinessMenu(); }
+      if (btn.dataset.allocationFilter) { stop(e); return filterAllocationTable(btn.dataset.allocationFilter,btn); }
+      if (btn.dataset.filterType) { stop(e); return cycleOverviewFilter(btn); }
+    }, true);
+
+    // Improve modal keyboard and accessibility behaviour.
+    document.addEventListener('keydown',e=>{ if(e.key==='Escape' && qs('#modalBackdrop').classList.contains('open')) closeModal(); });
+
+    // Final interaction audit marker used during browser verification.
+    document.documentElement.dataset.interactionAudit = 'complete';
+  })();
+  </script>
+
+
 </body>
 </html>
